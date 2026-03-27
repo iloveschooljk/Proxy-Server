@@ -64,7 +64,9 @@ def browse():
             elif action.startswith('/'):
                 base_url = '/'.join(url.split('/')[:3])
                 form['action'] = BASE + base_url + action
-            hidden = soup.new_tag('input', type='hidden', name='url')
+            hidden = soup.new_tag('input')
+            hidden['type'] = 'hidden'
+            hidden['name'] = 'url'
             form.append(hidden)
 
         return Response(str(soup), content_type='text/html')
