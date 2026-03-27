@@ -1,7 +1,10 @@
 from flask import Flask, request, Response
 import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
+
+BASE = "/browse?url="
 
 HTML = '''
 <!DOCTYPE html>
@@ -36,8 +39,43 @@ def browse():
     if not url.startswith('http'):
         url = 'https://' + url
     try:
-        resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        resp = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'}, allow_redirects=True)
         content_type = resp.headers.get('Content-Type', 'text/html')
-        return Response(resp.content, content_type=content_type)
+
+        if 'text/html' not in content_type:
+            return Response(resp.content, content_type=content_type)
+
+        soup = BeautifulSoup(resp.content, 'html.parser')
+
+        # Rewrite all links
+        for tag in soup.find_all('a', href=True):
+            href = tag['href']
+            if href.startswith('http'):
+                tag['href'] = BASE + href
+            elif href.startswith('/'):
+                base_url = '/'.join(url.split('/')[:3])
+                tag['href'] = BASE + base_url + href
+
+        # Rewrite form actions (so search works)
+        for form in soup.find_all('form'):
+            action = form.get('action', '')
+            if action.startswith('http'):
+                form['action'] = BASE + action
+            elif action.startswith('/'):
+                base_url = '/'.join(url.split('/')[:3])
+                form['action'] = BASE + base_url + action
+            # Add hidden field to carry url context
+            hidden = soup.new_tag('input', type='hidden', name='url')
+            form.append(hidden)
+
+        return Response(str(soup), content_type='text/html')
+
     except Exception as e:
         return f'Error: {e}', 500
+```
+
+Also update `requirements.txt`:
+```
+flask
+requests
+bs4
