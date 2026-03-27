@@ -1,20 +1,21 @@
 from flask import Flask, request, Response
 from bs4 import BeautifulSoup
 import requests
+from urllib.parse import quote, urljoin
 
 app = Flask(__name__)
 
 BASE = "/browse?url="
 
 TOOLBAR = '''
-<div style="position:fixed;top:0;left:0;width:100%;background:#1a1a1a;padding:8px;z-index:999999;box-shadow:0 2px 8px rgba(0,0,0,0.5);display:flex;gap:8px;">
-    <a href="/" style="color:#0070f3;text-decoration:none;font-weight:bold;font-family:Arial;padding:8px;">🌐 Proxy</a>
-    <form method="GET" action="/browse" style="display:flex;flex:1;gap:8px;">
-        <input type="text" name="url" placeholder="Search or enter URL..." style="flex:1;padding:8px;font-size:14px;background:#333;color:white;border:1px solid #555;border-radius:4px;" />
-        <button type="submit" style="padding:8px 16px;background:#0070f3;color:white;border:none;border-radius:4px;cursor:pointer;">Go</button>
+<div id="proxy-toolbar" style="position:fixed;top:0;left:0;width:100%;background:#1a1a1a;padding:8px;z-index:2147483647;box-shadow:0 2px 8px rgba(0,0,0,0.5);display:flex;gap:8px;box-sizing:border-box;">
+    <a href="/" style="color:#0070f3;text-decoration:none;font-weight:bold;font-family:Arial;padding:8px;white-space:nowrap;">🌐 Proxy</a>
+    <form method="GET" action="/browse" style="display:flex;flex:1;gap:8px;margin:0;">
+        <input type="text" name="url" placeholder="Search or enter URL..." style="flex:1;padding:8px;font-size:14px;background:#333;color:white;border:1px solid #555;border-radius:4px;min-width:0;" />
+        <button type="submit" style="padding:8px 16px;background:#0070f3;color:white;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;">Go</button>
     </form>
 </div>
-<div style="height:50px;"></div>
+<div style="height:52px;"></div>
 '''
 
 HTML = '''
@@ -22,6 +23,7 @@ HTML = '''
 <html>
 <head>
     <title>My Proxy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial, sans-serif; max-width: 800px; margin: 100px auto; padding: 20px; background: #111; color: white; }
         input { width: 70%; padding: 10px; font-size: 16px; background: #222; color: white; border: 1px solid #444; border-radius: 4px; }
@@ -47,17 +49,30 @@ def browse():
     url = request.args.get('url', '').strip()
     if not url:
         return 'No URL provided', 400
-    if ' ' in url or '.' not in url:
-        url = 'https://www.google.com/search?q=' + requests.utils.quote(url)
-    elif not url.startswith('http'):
+
+    # If it has spaces, treat as search query
+    if ' ' in url:
+        url = 'https://www.google.com/search?q=' + quote(url)
+    # If it has no dot or looks like a search term, send to Google
+    elif '.' not in url:
+        url = 'https://www.google.com/search?q=' + quote(url)
+    # Already a full URL
+    elif url.startswith('http://') or url.startswith('https://'):
+        pass
+    # Bare domain like google.com
+    else:
         url = 'https://' + url
+
     return browse_url(url)
 
 def browse_url(url):
     try:
-        resp = requests.get(url, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        resp = requests.get(url, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
         }, allow_redirects=True)
+
         content_type = resp.headers.get('Content-Type', 'text/html')
 
         if 'text/html' not in content_type:
@@ -65,7 +80,17 @@ def browse_url(url):
 
         soup = BeautifulSoup(resp.content, 'html.parser')
 
-        # Inject our toolbar at the top of body
+        # Make sure viewport meta tag exists so zoom is correct
+        viewport = soup.find('meta', attrs={'name': 'viewport'})
+        if not viewport:
+            head = soup.find('head')
+            if head:
+                new_meta = soup.new_tag('meta')
+                new_meta['name'] = 'viewport'
+                new_meta['content'] = 'width=device-width, initial-scale=1'
+                head.insert(0, new_meta)
+
+        # Inject toolbar
         toolbar = BeautifulSoup(TOOLBAR, 'html.parser')
         if soup.body:
             soup.body.insert(0, toolbar)
@@ -78,6 +103,18 @@ def browse_url(url):
             elif href.startswith('/'):
                 base_url = '/'.join(url.split('/')[:3])
                 tag['href'] = BASE + base_url + href
+
+        # Rewrite static asset URLs to load directly (images, css, js)
+        base_url = '/'.join(url.split('/')[:3])
+        for tag in soup.find_all(['img', 'script', 'link'], src=True):
+            src = tag.get('src', '')
+            if src.startswith('/'):
+                tag['src'] = base_url + src
+
+        for tag in soup.find_all('link', href=True):
+            href = tag.get('href', '')
+            if href.startswith('/'):
+                tag['href'] = base_url + href
 
         return Response(str(soup), content_type='text/html')
 
