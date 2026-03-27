@@ -1,6 +1,6 @@
 from flask import Flask, request, Response
-import requests
 from bs4 import BeautifulSoup
+import requests
 
 app = Flask(__name__)
 
@@ -56,7 +56,7 @@ def browse():
                 base_url = '/'.join(url.split('/')[:3])
                 tag['href'] = BASE + base_url + href
 
-        # Rewrite form actions (so search works)
+        # Rewrite form actions so search works
         for form in soup.find_all('form'):
             action = form.get('action', '')
             if action.startswith('http'):
@@ -64,7 +64,6 @@ def browse():
             elif action.startswith('/'):
                 base_url = '/'.join(url.split('/')[:3])
                 form['action'] = BASE + base_url + action
-            # Add hidden field to carry url context
             hidden = soup.new_tag('input', type='hidden', name='url')
             form.append(hidden)
 
@@ -72,10 +71,5 @@ def browse():
 
     except Exception as e:
         return f'Error: {e}', 500
-```
 
-Also update `requirements.txt`:
-```
-flask
-requests
-bs4
+handler = app
