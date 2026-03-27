@@ -1,68 +1,58 @@
 from flask import Flask, request, Response
 from bs4 import BeautifulSoup
 import requests
-from urllib.parse import quote, urljoin, urlparse, urlencode, parse_qs
+from urllib.parse import quote, unquote, urlparse, urljoin
 
 app = Flask(__name__)
 
-TOOLBAR = '''
-<div id="__proxy_bar__" style="position:fixed;top:0;left:0;width:100%;background:#1a1a1a;padding:6px 10px;z-index:2147483647;box-shadow:0 2px 8px rgba(0,0,0,0.6);display:flex;align-items:center;gap:8px;box-sizing:border-box;font-family:Arial,sans-serif;">
-    <a href="/" style="color:#0070f3;text-decoration:none;font-weight:bold;font-size:18px;padding:4px 8px;flex-shrink:0;">🌐</a>
-    <form method="GET" action="/browse" style="display:flex;flex:1;gap:6px;margin:0;">
-        <input type="text" name="url" placeholder="Search or enter URL..." 
-               style="flex:1;padding:7px 10px;font-size:14px;background:#2a2a2a;color:white;border:1px solid #555;border-radius:5px;min-width:0;outline:none;" />
-        <button type="submit" 
-                style="padding:7px 16px;background:#0070f3;color:white;border:none;border-radius:5px;cursor:pointer;font-size:14px;flex-shrink:0;">Go</button>
-    </form>
-</div>
-<div style="height:46px;"></div>
-'''
+def wrap(url):
+    return '/browse?url=' + quote(url, safe='')
 
-HOME = '''<!DOCTYPE html>
-<html>
-<head>
-    <title>Proxy</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: Arial, sans-serif; background: #111; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 20px; padding: 20px; }
-        h1 { color: #0070f3; font-size: 2rem; }
-        form { display: flex; width: 100%; max-width: 600px; gap: 8px; }
-        input { flex: 1; padding: 12px 16px; font-size: 16px; background: #222; color: white; border: 1px solid #444; border-radius: 6px; outline: none; }
-        button { padding: 12px 20px; background: #0070f3; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
-    </style>
-</head>
-<body>
-    <h1>🌐 Web Proxy</h1>
-    <form method="GET" action="/browse">
-        <input type="text" name="url" placeholder="Search anything or enter a URL..." autofocus />
-        <button type="submit">Go</button>
-    </form>
-</body>
-</html>'''
+def unwrap(raw):
+    # Decode any percent-encoding so we always work with a clean URL
+    return unquote(raw.strip())
 
-def is_valid_url(s):
-    try:
-        result = urlparse(s)
-        return result.scheme in ('http', 'https') and bool(result.netloc)
-    except:
+def is_url(s):
+    if ' ' in s:
         return False
+    parsed = urlparse(s)
+    if parsed.scheme in ('http', 'https') and parsed.netloc:
+        return True
+    # Bare domain like google.com or youtube.com
+    if '.' in s and not s.startswith('.'):
+        return True
+    return False
 
-def resolve_url(input_str, base_url=None):
-    s = input_str.strip()
-    # Already a full valid URL
-    if is_valid_url(s):
-        return s
-    # Relative URL - resolve against base
-    if base_url and (s.startswith('/') or not s.startswith('http')):
-        if s.startswith('/'):
-            parsed = urlparse(base_url)
-            return f"{parsed.scheme}://{parsed.netloc}{s}"
-    # Has a dot and no spaces - treat as domain
-    if '.' in s and ' ' not in s:
-        return 'https://' + s
-    # Everything else - Google search
-    return 'https://www.google.com/search?q=' + quote(s)
+TOOLBAR = '''<div id="__ptb" style="position:fixed;top:0;left:0;right:0;height:44px;background:#18181b;display:flex;align-items:center;gap:8px;padding:0 12px;z-index:2147483647;box-shadow:0 2px 10px rgba(0,0,0,0.7);font-family:Arial,sans-serif;">
+  <a href="/" style="color:#3b82f6;font-size:20px;text-decoration:none;flex-shrink:0;">🌐</a>
+  <form method="GET" action="/browse" style="display:flex;flex:1;gap:6px;margin:0;" onsubmit="var v=this.querySelector('input').value.trim();if(v&&v.indexOf('.')===-1&&v.indexOf(' ')===-1){this.querySelector('input').value='https://www.google.com/search?q='+encodeURIComponent(v);return true;}">
+    <input name="url" type="text" placeholder="Search or enter URL..." autocomplete="off"
+      style="flex:1;min-width:0;padding:6px 10px;font-size:14px;background:#27272a;color:#fff;border:1px solid #3f3f46;border-radius:5px;outline:none;" />
+    <button type="submit" style="padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:14px;flex-shrink:0;">Go</button>
+  </form>
+</div>
+<div style="height:44px"></div>'''
+
+HOME = '''<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proxy</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#09090b;color:#fff;font-family:Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:20px}
+h1{font-size:2rem;color:#3b82f6}
+p{color:#a1a1aa;font-size:14px}
+form{display:flex;width:100%;max-width:560px;gap:8px}
+input{flex:1;padding:12px 16px;font-size:16px;background:#18181b;color:#fff;border:1px solid #3f3f46;border-radius:6px;outline:none}
+button{padding:12px 20px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:16px}
+</style></head>
+<body>
+<h1>🌐 Proxy</h1>
+<p>Type anything — a search term or a full URL</p>
+<form method="GET" action="/browse">
+  <input name="url" type="text" placeholder="youtube.com or search anything..." autofocus/>
+  <button>Go</button>
+</form>
+</body></html>'''
 
 @app.route('/')
 def home():
@@ -73,100 +63,96 @@ def browse():
     raw = request.args.get('url', '').strip()
     if not raw:
         return HOME
-    url = resolve_url(raw)
-    return fetch_and_rewrite(url)
 
-def fetch_and_rewrite(url):
+    url = unwrap(raw)
+
+    # If it's already a full valid URL, use it directly
+    if url.startswith('http://') or url.startswith('https://'):
+        pass
+    elif is_url(url):
+        url = 'https://' + url
+    else:
+        # Treat as search query
+        url = 'https://www.google.com/search?q=' + quote(url)
+
+    return fetch_page(url)
+
+def fetch_page(url):
     try:
-        headers = {
+        resp = requests.get(url, timeout=15, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
-        }
-        resp = requests.get(url, timeout=15, headers=headers, allow_redirects=True)
-        content_type = resp.headers.get('Content-Type', 'text/html')
+            'Accept-Encoding': 'gzip, deflate',
+        }, allow_redirects=True)
 
-        # Non-HTML — return as-is (images, css, js, etc.)
+        content_type = resp.headers.get('Content-Type', '')
+
+        # Pass through non-HTML content directly
         if 'text/html' not in content_type:
             return Response(resp.content, content_type=content_type)
 
+        final_url = resp.url
+        parsed = urlparse(final_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+
         soup = BeautifulSoup(resp.content, 'html.parser')
-        parsed_base = urlparse(url)
-        base_origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
 
-        # Remove existing base tags to avoid conflicts
-        for tag in soup.find_all('base'):
-            tag.decompose()
+        # Remove base tags
+        for t in soup.find_all('base'):
+            t.decompose()
 
-        # Fix viewport — only add if missing, never override
-        if not soup.find('meta', attrs={'name': 'viewport'}):
-            head = soup.find('head')
-            if head:
-                vp = soup.new_tag('meta')
-                vp['name'] = 'viewport'
-                vp['content'] = 'width=device-width, initial-scale=1'
-                head.insert(0, vp)
-
-        # Rewrite all <a> hrefs
+        # Rewrite <a> links
         for tag in soup.find_all('a', href=True):
             href = tag['href'].strip()
-            if href.startswith('#') or href.startswith('javascript:') or href.startswith('mailto:'):
+            if not href or href.startswith('javascript:') or href.startswith('mailto:') or href.startswith('#'):
                 continue
-            if href.startswith('http'):
-                full = href
-            elif href.startswith('//'):
+            if href.startswith('//'):
                 full = 'https:' + href
+            elif href.startswith('http'):
+                full = href
             elif href.startswith('/'):
-                full = base_origin + href
+                full = origin + href
             else:
-                full = urljoin(url, href)
-            tag['href'] = '/browse?url=' + quote(full, safe='')
+                full = urljoin(final_url, href)
+            tag['href'] = wrap(full)
 
-        # Rewrite static assets to load directly (not through proxy)
-        for tag in soup.find_all(['script', 'img', 'source'], src=True):
-            src = tag.get('src', '').strip()
-            if src.startswith('//'):
-                tag['src'] = 'https:' + src
-            elif src.startswith('/') and not src.startswith('//'):
-                tag['src'] = base_origin + src
+        # Rewrite src attributes (load assets directly, not through proxy)
+        for tag in soup.find_all(True):
+            for attr in ['src', 'data-src']:
+                val = tag.get(attr, '')
+                if not val:
+                    continue
+                if val.startswith('//'):
+                    tag[attr] = 'https:' + val
+                elif val.startswith('/') and not val.startswith('//'):
+                    tag[attr] = origin + val
 
+        # Rewrite link hrefs (CSS etc)
         for tag in soup.find_all('link', href=True):
-            href = tag.get('href', '').strip()
+            href = tag['href']
             if href.startswith('//'):
                 tag['href'] = 'https:' + href
-            elif href.startswith('/') and not href.startswith('//'):
-                tag['href'] = base_origin + href
+            elif href.startswith('/'):
+                tag['href'] = origin + href
 
-        # Rewrite srcset attributes
-        for tag in soup.find_all(srcset=True):
-            parts = tag['srcset'].split(',')
-            new_parts = []
-            for part in parts:
-                bits = part.strip().split()
-                if bits:
-                    src = bits[0]
-                    if src.startswith('//'):
-                        src = 'https:' + src
-                    elif src.startswith('/'):
-                        src = base_origin + src
-                    bits[0] = src
-                new_parts.append(' '.join(bits))
-            tag['srcset'] = ', '.join(new_parts)
+        # Inject scale fix + toolbar
+        scale_fix = soup.new_tag('style')
+        scale_fix.string = '#__ptb{zoom:1!important;transform:none!important}'
+        if soup.head:
+            soup.head.append(scale_fix)
 
-        # Inject toolbar at top of body
         if soup.body:
-            toolbar_soup = BeautifulSoup(TOOLBAR, 'html.parser')
-            soup.body.insert(0, toolbar_soup)
+            tb = BeautifulSoup(TOOLBAR, 'html.parser')
+            soup.body.insert(0, tb)
 
         return Response(str(soup), content_type='text/html; charset=utf-8')
 
     except Exception as e:
-        return f'''<!DOCTYPE html>
-<html><body style="background:#111;color:white;font-family:Arial;padding:40px;">
+        return f'''<!DOCTYPE html><html><body style="background:#09090b;color:#fff;font-family:Arial;padding:60px 20px;">
 {TOOLBAR}
-<h2 style="color:red;">Error loading page</h2>
-<p>{str(e)}</p>
-<p>Try a different URL or check your connection.</p>
+<h2 style="color:#ef4444;margin-bottom:12px">Failed to load page</h2>
+<p style="color:#a1a1aa">{str(e)}</p>
 </body></html>''', 500
 
 handler = app
